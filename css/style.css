@@ -481,5 +481,7 @@ max-width: 100%;
 .footer-cr p strong a {
     color: #2e367da1;
 }
-
+#uss{
+    font-weight: 600;
+}
 /*footer cr end*/
