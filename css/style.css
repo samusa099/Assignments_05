@@ -296,6 +296,7 @@ max-width: 100%;
 
 
 .blue-box {
+    margin: 0px auto;
     padding: 100px 50px 91.5px;
     background: #2E367D;
     border-radius: 10px;
