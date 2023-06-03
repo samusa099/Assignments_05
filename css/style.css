@@ -296,7 +296,7 @@ max-width: 100%;
 
 
 .blue-box {
-    padding: 100px 50px;
+    padding: 100px 50px 91.5px;
     background: #2E367D;
     border-radius: 10px;
     display: flex;
@@ -356,7 +356,7 @@ max-width: 100%;
 
 
 
-
+/*footer start*/
 
 
 .footer{
@@ -395,7 +395,7 @@ max-width: 100%;
 .widget ul li{
     list-style: none;
 }
-/*footer start*/
+
 .footer {
     width: 100%;
     padding: 80px 0px;
