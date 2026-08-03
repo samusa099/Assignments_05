@@ -1,14 +1,82 @@
 name: Issue First Automation
+
 on:
   workflow_run:
     types: [completed]
   pull_request_target:
     types: [opened, reopened, ready_for_review]
+
 permissions:
   actions: read
   contents: read
   issues: write
   pull-requests: write
+
 jobs:
-  policy:
-    uses: samusa099/Agency-Statup/.github/workflows/reusable-issue-first.yml@83b676ff18b2afd2a5c5aca48039e3c3a44db7c1
+  issue-first:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Route bot PRs and CI failures to issues
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            async function ensureLabel(name, color, description) {
+              try { await github.rest.issues.getLabel({ owner, repo, name }); }
+              catch { await github.rest.issues.createLabel({ owner, repo, name, color, description }); }
+            }
+            for (const label of [
+              ['bot:proposal','5319e7','Proposal raised by an automated bot'],
+              ['bot:ci-failure','b60205','CI failure reported automatically'],
+              ['status:triage','fbca04','Awaiting human triage'],
+              ['issue-first','0e8a16','Tracked as an issue before implementation'],
+              ['auto-resolved','0e8a16','Automatically resolved after successful verification']
+            ]) await ensureLabel(...label);
+
+            if (context.eventName === 'pull_request_target') {
+              const pr = context.payload.pull_request;
+              const isBot = context.actor.endsWith('[bot]');
+              const allowed = (pr.labels || []).some(l => l.name === 'allow-bot-pr');
+              if (!isBot || allowed) return;
+              const marker = `<!-- bot-pr:${pr.number} -->`;
+              const { data: open } = await github.rest.issues.listForRepo({ owner, repo, state:'open', labels:'bot:proposal', per_page:100 });
+              let issue = open.find(i => !i.pull_request && (i.body || '').includes(marker));
+              if (!issue) {
+                issue = (await github.rest.issues.create({
+                  owner, repo,
+                  title:`[Bot Proposal] ${pr.title}`,
+                  labels:['bot:proposal','status:triage','issue-first'],
+                  body:`${marker}\n## Automated proposal\n\nBot PR #${pr.number} was converted to an issue under the **Issue First** policy.\n\n- **Bot:** @${context.actor}\n- **Original PR:** ${pr.html_url}\n- **Source:** \`${pr.head.label}\`\n- **Target:** \`${pr.base.ref}\`\n\n## Required decision\n- [ ] Validate the problem/change\n- [ ] Define acceptance criteria\n- [ ] Add \`approved-for-fix\` after approval\n- [ ] Implement only after approval\n\nAdd \`allow-bot-pr\` when a direct bot PR is intentionally permitted.`
+                })).data;
+              }
+              await github.rest.issues.createComment({ owner, repo, issue_number:pr.number, body:`Converted to issue #${issue.number} under the Issue First policy.` });
+              await github.rest.pulls.update({ owner, repo, pull_number:pr.number, state:'closed' });
+              return;
+            }
+
+            if (context.eventName !== 'workflow_run') return;
+            const run = context.payload.workflow_run;
+            if (run.name === 'Issue First Automation') return;
+            const key = `${run.name}:${run.head_branch || 'unknown'}`;
+            const marker = `<!-- workflow-key:${key} -->`;
+            const { data: issues } = await github.rest.issues.listForRepo({ owner, repo, state:'open', labels:'bot:ci-failure', per_page:100 });
+            const existing = issues.find(i => !i.pull_request && (i.body || '').includes(marker));
+            if (run.conclusion === 'success') {
+              if (existing) {
+                await github.rest.issues.createComment({ owner, repo, issue_number:existing.number, body:`✅ Verified by successful run: ${run.html_url}` });
+                await github.rest.issues.update({ owner, repo, issue_number:existing.number, state:'closed', labels:[...new Set([...(existing.labels || []).map(l => l.name), 'auto-resolved'])] });
+              }
+              return;
+            }
+            if (!['failure','timed_out','cancelled','action_required','startup_failure'].includes(run.conclusion)) return;
+            const details = `- **Workflow:** ${run.name}\n- **Branch:** \`${run.head_branch || 'unknown'}\`\n- **Conclusion:** \`${run.conclusion}\`\n- **Commit:** \`${run.head_sha}\`\n- **Run:** ${run.html_url}`;
+            if (existing) {
+              await github.rest.issues.createComment({ owner, repo, issue_number:existing.number, body:`Failure occurred again.\n\n${details}` });
+            } else {
+              await github.rest.issues.create({
+                owner, repo,
+                title:`[CI Failure] ${run.name} on ${run.head_branch || 'unknown'}`,
+                labels:['bot:ci-failure','status:triage','issue-first'],
+                body:`${marker}\n## Automated failure report\n\n${details}\n\n## Resolution rules\n- [ ] Identify root cause from logs\n- [ ] Record proposed fix and risk\n- [ ] Apply the smallest safe change\n- [ ] Verify with a successful rerun\n\nThis issue closes automatically after the same workflow succeeds on the same branch.`
+              });
+            }
